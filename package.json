@@ -1,0 +1,36 @@
+{
+  "name": "local-action-checker",
+  "version": "1.0.0",
+  "description": "GitHub App that acts as an environment protection rule to check for local GitHub Action usage",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "jest",
+    "analyze": "node cli.js",
+    "test:coverage": "jest --coverage"
+  },
+  "bin": {
+    "local-action-checker": "./cli.js"
+  },
+  "keywords": [
+    "github",
+    "app",
+    "environment-protection",
+    "actions",
+    "webhook"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/webhooks": "^12.0.10",
+    "@octokit/app": "^14.0.2",
+    "express": "^4.18.2",
+    "js-yaml": "^4.1.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2"
+  }
+}

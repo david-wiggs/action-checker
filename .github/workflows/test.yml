@@ -1,0 +1,36 @@
+name: Test Local Action Checker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Run tests
+        run: npm test
+        
+      - name: Test CLI with local actions
+        run: node cli.js examples/workflow-with-local-actions.yml
+        
+      - name: Test CLI without local actions
+        run: node cli.js examples/workflow-without-local-actions.yml
+        
+      - name: Test with ALLOW_LOCAL_ACTIONS=true
+        env:
+          ALLOW_LOCAL_ACTIONS: true
+        run: node cli.js examples/workflow-with-local-actions.yml
