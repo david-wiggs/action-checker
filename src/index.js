@@ -122,6 +122,13 @@ webhooks.on('deployment_protection_rule.requested', async ({ payload }) => {
   console.log('Deployment ID:', payload.deployment?.id);
   console.log('Deployment callback URL:', payload.deployment_callback_url);
   
+  // Early check for dynamic workflows - these should be completely ignored
+  if (isDynamicWorkflow(payload)) {
+    console.log('🔍 Detected dynamic code scanning workflow - ignoring completely');
+    console.log('Dynamic workflows are managed by GitHub and should not be processed by protection rule apps');
+    return; // Exit early without any API calls
+  }
+  
   // Log the full payload structure for debugging (be careful with sensitive data)
   console.log('Payload keys:', Object.keys(payload));
   console.log('Repository keys:', Object.keys(payload.repository || {}));
@@ -148,7 +155,15 @@ webhooks.on('deployment_protection_rule.requested', async ({ payload }) => {
     const workflowRun = await getWorkflowRun(installation, payload);
     
     if (!workflowRun) {
-      console.error('Could not find workflow run');
+      console.error('Could not find workflow run or workflow was ignored');
+      
+      // Check if this was a dynamic workflow that we ignored
+      if (isDynamicWorkflow(payload)) {
+        console.log('🔍 Ignoring dynamic code scanning workflow - no action required');
+        console.log('Dynamic workflows are handled automatically by GitHub and cannot be approved/rejected by apps');
+        return;
+      }
+      
       await rejectDeployment(installation, payload, 'Could not analyze workflow');
       return;
     }
@@ -255,6 +270,12 @@ async function getWorkflowRun(installation, payload) {
       path: workflowRun.path,
       head_sha: workflowRun.head_sha
     });
+
+    // Check if this is a dynamic workflow that should be ignored
+    if (workflowRun.path && workflowRun.path.includes('dynamic/github-code-scanning/codeql')) {
+      console.log('⏭️  Ignoring dynamic code scanning workflow:', workflowRun.path);
+      return null;
+    }
 
     return workflowRun;
   } catch (error) {
@@ -398,6 +419,17 @@ async function getWorkflowRunIdFromPayload(payload) {
 webhooks.onError((error) => {
   console.error('Webhook error:', error);
 });
+
+// Helper function to check if a workflow is dynamic
+function isDynamicWorkflow(payload) {
+  // Check deployment callback URL
+  if (payload.deployment_callback_url && payload.deployment_callback_url.includes('dynamic/github-code-scanning/codeql')) {
+    return true;
+  }
+  
+  // Additional checks can be added here for other types of dynamic workflows
+  return false;
+}
 
 // Start server
 app.listen(port, () => {
