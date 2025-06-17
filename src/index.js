@@ -115,15 +115,34 @@ app.post('/webhook', async (req, res) => {
 
 // Handle deployment protection rule events
 webhooks.on('deployment_protection_rule.requested', async ({ payload }) => {
-  console.log('Deployment protection rule requested:', {
-    repository: payload.repository.full_name,
-    environment: payload.environment,
-    deployment_callback_url: payload.deployment_callback_url,
-  });
+  console.log('🚀 Deployment protection rule requested');
+  console.log('Repository:', payload.repository?.full_name);
+  console.log('Environment:', payload.environment);
+  console.log('Installation ID:', payload.installation?.id);
+  console.log('Deployment ID:', payload.deployment?.id);
+  console.log('Deployment callback URL:', payload.deployment_callback_url);
+  
+  // Log the full payload structure for debugging (be careful with sensitive data)
+  console.log('Payload keys:', Object.keys(payload));
+  console.log('Repository keys:', Object.keys(payload.repository || {}));
+  console.log('Deployment keys:', Object.keys(payload.deployment || {}));
+  console.log('Installation keys:', Object.keys(payload.installation || {}));
 
   try {
     // Get installation for the repository
+    console.log('Getting installation for ID:', payload.installation?.id);
+    
+    if (!payload.installation?.id) {
+      console.error('No installation ID found in payload');
+      await rejectDeployment(null, payload, 'No installation ID found');
+      return;
+    }
+
     const installation = await githubApp.getInstallationOctokit(payload.installation.id);
+    
+    console.log('Installation object keys:', Object.keys(installation));
+    console.log('Installation has request?', !!installation.request);
+    console.log('Installation has auth?', !!installation.auth);
     
     // Get the workflow run details
     const workflowRun = await getWorkflowRun(installation, payload);
@@ -133,6 +152,9 @@ webhooks.on('deployment_protection_rule.requested', async ({ payload }) => {
       await rejectDeployment(installation, payload, 'Could not analyze workflow');
       return;
     }
+
+    // Store the workflow run ID for approval/rejection
+    payload._workflowRunId = workflowRun.id;
 
     // Get the workflow file content
     const workflowContent = await getWorkflowContent(installation, payload, workflowRun);
@@ -164,31 +186,84 @@ webhooks.on('deployment_protection_rule.requested', async ({ payload }) => {
 
   } catch (error) {
     console.error('Error processing deployment protection rule:', error);
-    await rejectDeployment(installation, payload, 'Internal error occurred during analysis');
+    console.error('Error stack:', error.stack);
+    
+    // Try to get installation again if it wasn't set
+    let installationForReject = installation;
+    if (!installationForReject && payload.installation?.id) {
+      try {
+        installationForReject = await githubApp.getInstallationOctokit(payload.installation.id);
+      } catch (installError) {
+        console.error('Could not get installation for rejection:', installError);
+      }
+    }
+    
+    await rejectDeployment(installationForReject, payload, 'Internal error occurred during analysis');
   }
 });
 
 async function getWorkflowRun(installation, payload) {
   try {
+    console.log('Getting workflow run with payload:', {
+      owner: payload.repository?.owner?.login,
+      repo: payload.repository?.name,
+      deployment_id: payload.deployment?.id
+    });
+
+    if (!installation || !installation.request) {
+      throw new Error('Invalid installation object - missing request method');
+    }
+
+    if (!payload.deployment?.id) {
+      throw new Error('No deployment ID found in payload');
+    }
+
     // The deployment callback URL contains information about the workflow run
     // We need to extract the run ID from the deployment context
-    const { data: deployment } = await installation.rest.repos.getDeployment({
+    const deployment = await installation.request('GET /repos/{owner}/{repo}/deployments/{deployment_id}', {
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
       deployment_id: payload.deployment.id,
     });
 
+    console.log('Deployment data:', {
+      id: deployment.data.id,
+      sha: deployment.data.sha,
+      ref: deployment.data.ref,
+      environment: deployment.data.environment
+    });
+
     // Get workflow runs for the deployment ref
-    const { data: workflowRuns } = await installation.rest.actions.listWorkflowRunsForRepo({
+    const workflowRuns = await installation.request('GET /repos/{owner}/{repo}/actions/runs', {
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
-      head_sha: deployment.sha,
+      head_sha: deployment.data.sha,
       per_page: 1,
     });
 
-    return workflowRuns.workflow_runs[0];
+    console.log('Found workflow runs:', workflowRuns.data.workflow_runs.length);
+    
+    if (workflowRuns.data.workflow_runs.length === 0) {
+      console.warn('No workflow runs found for deployment SHA:', deployment.data.sha);
+      return null;
+    }
+
+    const workflowRun = workflowRuns.data.workflow_runs[0];
+    console.log('Selected workflow run:', {
+      id: workflowRun.id,
+      name: workflowRun.name,
+      path: workflowRun.path,
+      head_sha: workflowRun.head_sha
+    });
+
+    return workflowRun;
   } catch (error) {
     console.error('Error getting workflow run:', error);
+    console.error('Error details:', {
+      message: error.message,
+      status: error.status,
+      response: error.response?.data
+    });
     return null;
   }
 }
@@ -197,7 +272,7 @@ async function getWorkflowContent(installation, payload, workflowRun) {
   try {
     const workflowPath = workflowRun.path;
     
-    const { data: fileContent } = await installation.rest.repos.getContent({
+    const fileContent = await installation.request('GET /repos/{owner}/{repo}/contents/{path}', {
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
       path: workflowPath,
@@ -205,7 +280,7 @@ async function getWorkflowContent(installation, payload, workflowRun) {
     });
 
     // Decode base64 content
-    return Buffer.from(fileContent.content, 'base64').toString('utf8');
+    return Buffer.from(fileContent.data.content, 'base64').toString('utf8');
   } catch (error) {
     console.error('Error getting workflow content:', error);
     return null;
@@ -214,14 +289,29 @@ async function getWorkflowContent(installation, payload, workflowRun) {
 
 async function approveDeployment(installation, payload, analysisResult) {
   try {
+    if (!installation || !installation.request) {
+      console.error('Cannot approve deployment: invalid installation object');
+      return;
+    }
+
     const message = analysisResult.hasLocalActions 
       ? `Deployment approved despite local actions: ${analysisResult.localActions.join(', ')}`
       : 'Deployment approved: No local actions detected';
 
+    console.log('Approving deployment with message:', message);
+
+    // First, we need to get the workflow run ID from the deployment callback URL
+    const runId = await getWorkflowRunIdFromPayload(payload);
+    
+    if (!runId) {
+      console.error('Cannot approve: No workflow run ID found');
+      return;
+    }
+
     await installation.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/deployment_protection_rule', {
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
-      run_id: payload.deployment.id,
+      run_id: runId,
       environment_name: payload.environment,
       state: 'approved',
       comment: message,
@@ -230,15 +320,36 @@ async function approveDeployment(installation, payload, analysisResult) {
     console.log('Deployment approved:', message);
   } catch (error) {
     console.error('Error approving deployment:', error);
+    console.error('Error details:', {
+      message: error.message,
+      status: error.status,
+      response: error.response?.data
+    });
   }
 }
 
 async function rejectDeployment(installation, payload, reason) {
   try {
+    if (!installation || !installation.request) {
+      console.error('Cannot reject deployment: invalid installation object');
+      console.error('Rejection reason would have been:', reason);
+      return;
+    }
+
+    console.log('Rejecting deployment with reason:', reason);
+
+    // First, we need to get the workflow run ID from the deployment callback URL
+    const runId = await getWorkflowRunIdFromPayload(payload);
+    
+    if (!runId) {
+      console.error('Cannot reject: No workflow run ID found');
+      return;
+    }
+
     await installation.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/deployment_protection_rule', {
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
-      run_id: payload.deployment.id,
+      run_id: runId,
       environment_name: payload.environment,
       state: 'rejected',
       comment: reason,
@@ -247,6 +358,39 @@ async function rejectDeployment(installation, payload, reason) {
     console.log('Deployment rejected:', reason);
   } catch (error) {
     console.error('Error rejecting deployment:', error);
+    console.error('Error details:', {
+      message: error.message,
+      status: error.status,
+      response: error.response?.data
+    });
+  }
+}
+
+async function getWorkflowRunIdFromPayload(payload) {
+  try {
+    // First try to use the stored workflow run ID
+    if (payload._workflowRunId) {
+      console.log('Using stored workflow run ID:', payload._workflowRunId);
+      return payload._workflowRunId;
+    }
+    
+    // The deployment callback URL contains the workflow run ID
+    // Format: https://api.github.com/repos/owner/repo/actions/runs/{run_id}/deployment_protection_rule
+    if (payload.deployment_callback_url) {
+      const match = payload.deployment_callback_url.match(/\/actions\/runs\/(\d+)\/deployment_protection_rule/);
+      if (match) {
+        console.log('Extracted workflow run ID from callback URL:', match[1]);
+        return parseInt(match[1], 10);
+      }
+    }
+    
+    // Fallback: try to get it from the workflow run we found earlier
+    // This requires making an API call, which we already do in getWorkflowRun
+    console.warn('Could not extract run ID from callback URL, using deployment ID as fallback');
+    return payload.deployment?.id;
+  } catch (error) {
+    console.error('Error extracting workflow run ID:', error);
+    return payload.deployment?.id;
   }
 }
 
