@@ -26,7 +26,37 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// Webhook endpoint
+// Root endpoint that shows app info for GET requests
+app.get('/', (req, res) => {
+  res.json({ 
+    name: 'Local Action Checker',
+    description: 'GitHub App environment protection rule for local actions',
+    status: 'running',
+    endpoints: {
+      health: '/health',
+      webhook: '/ (POST)'
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Webhook endpoint at root path
+app.post('/', async (req, res) => {
+  try {
+    await webhooks.verifyAndReceive({
+      id: req.headers['x-github-delivery'],
+      name: req.headers['x-github-event'],
+      signature: req.headers['x-hub-signature-256'],
+      payload: req.body,
+    });
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(400).send('Bad Request');
+  }
+});
+
+// Keep the /webhook endpoint for backward compatibility
 app.post('/webhook', async (req, res) => {
   try {
     await webhooks.verifyAndReceive({
@@ -187,7 +217,8 @@ webhooks.onError((error) => {
 // Start server
 app.listen(port, () => {
   console.log(`Local Action Checker GitHub App listening on port ${port}`);
-  console.log(`Webhook endpoint: http://localhost:${port}/webhook`);
+  console.log(`Webhook endpoint: http://localhost:${port}/`);
+  console.log(`Webhook endpoint (legacy): http://localhost:${port}/webhook`);
   console.log(`Health check: http://localhost:${port}/health`);
 });
 

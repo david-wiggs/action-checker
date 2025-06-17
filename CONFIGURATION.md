@@ -103,17 +103,29 @@ ALLOW_LOCAL_ACTIONS=true node cli.js path/to/workflow.yml
 
 ## Monitoring and Alerting
 
+### Webhook Endpoint
+```
+POST /
+```
+Primary endpoint that receives GitHub webhook events.
+
+### Legacy Webhook Endpoint
+```
+POST /webhook
+```
+Maintained for backward compatibility.
+
+### App Information Endpoint
+```
+GET /
+```
+Returns app information and status.
+
 ### Health Check Endpoint
 ```
 GET /health
 ```
 Returns JSON with status and timestamp.
-
-### Webhook Endpoint
-```
-POST /webhook
-```
-Receives GitHub webhook events.
 
 ### Log Monitoring
 

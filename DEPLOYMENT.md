@@ -16,7 +16,7 @@ This guide will help you deploy the Local Action Checker GitHub App.
 4. Fill in the required information:
    - **App name**: `Local Action Checker` (or your preferred name)
    - **Homepage URL**: Your app's homepage (can be your repository)
-   - **Webhook URL**: `https://your-domain.com/webhook`
+   - **Webhook URL**: `https://your-domain.com/` (root URL of your deployed app)
    - **Webhook secret**: Generate a random secret string
 
 ### Permissions

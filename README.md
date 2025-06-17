@@ -19,7 +19,7 @@ This GitHub App acts as an environment protection rule that evaluates workflow f
 2. Create a GitHub App:
    - Go to GitHub Settings > Developer settings > GitHub Apps
    - Create a new GitHub App
-   - Set the webhook URL to your deployed app endpoint
+   - Set the webhook URL to your deployed app's root URL (e.g., `https://your-app.com/`)
    - Enable the following permissions:
      - Repository permissions: Actions (read), Contents (read), Environments (write)
      - Subscribe to: Deployment protection rule events
@@ -54,5 +54,7 @@ The app can be configured through environment variables:
 
 ## API Endpoints
 
-- `POST /webhook` - GitHub webhook endpoint
+- `POST /` - Primary webhook endpoint for GitHub events
+- `POST /webhook` - Legacy webhook endpoint (for backward compatibility)
+- `GET /` - App information and status
 - `GET /health` - Health check endpoint
