@@ -4,6 +4,21 @@ const { Webhooks } = require('@octokit/webhooks');
 const { App } = require('@octokit/app');
 const WorkflowAnalyzer = require('./workflow-analyzer');
 
+// Validate required environment variables
+const requiredEnvVars = ['GITHUB_APP_ID', 'GITHUB_PRIVATE_KEY', 'GITHUB_WEBHOOK_SECRET'];
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingVars.join(', '));
+  console.error('Please check your .env file and ensure all required variables are set.');
+  process.exit(1);
+}
+
+console.log('✅ Environment variables validated');
+console.log(`📱 GitHub App ID: ${process.env.GITHUB_APP_ID}`);
+console.log(`🔐 Webhook Secret: ${process.env.GITHUB_WEBHOOK_SECRET ? 'Set' : 'Missing'}`);
+console.log(`🔑 Private Key: ${process.env.GITHUB_PRIVATE_KEY ? 'Set (' + process.env.GITHUB_PRIVATE_KEY.length + ' chars)' : 'Missing'}`);
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -18,7 +33,9 @@ const webhooks = new Webhooks({
   secret: process.env.GITHUB_WEBHOOK_SECRET,
 });
 
-// Middleware
+// Middleware for webhook verification - use raw body
+app.use('/webhook', express.raw({ type: 'application/json' }));
+app.use('/', express.raw({ type: 'application/json', limit: '10mb' }));
 app.use(express.json());
 
 // Health check endpoint
@@ -42,32 +59,56 @@ app.get('/', (req, res) => {
 
 // Webhook endpoint at root path
 app.post('/', async (req, res) => {
+  console.log('Webhook received at root path');
+  console.log('Headers:', {
+    'x-github-delivery': req.headers['x-github-delivery'],
+    'x-github-event': req.headers['x-github-event'],
+    'x-hub-signature-256': req.headers['x-hub-signature-256'],
+    'content-type': req.headers['content-type']
+  });
+
   try {
+    const payload = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
+    
     await webhooks.verifyAndReceive({
       id: req.headers['x-github-delivery'],
       name: req.headers['x-github-event'],
       signature: req.headers['x-hub-signature-256'],
-      payload: req.body,
+      payload: payload,
     });
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook error at root:', error);
+    console.error('Request body type:', typeof req.body);
+    console.error('Request body length:', req.body ? req.body.length : 'undefined');
     res.status(400).send('Bad Request');
   }
 });
 
 // Keep the /webhook endpoint for backward compatibility
 app.post('/webhook', async (req, res) => {
+  console.log('Webhook received at /webhook path');
+  console.log('Headers:', {
+    'x-github-delivery': req.headers['x-github-delivery'],
+    'x-github-event': req.headers['x-github-event'],
+    'x-hub-signature-256': req.headers['x-hub-signature-256'],
+    'content-type': req.headers['content-type']
+  });
+
   try {
+    const payload = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
+    
     await webhooks.verifyAndReceive({
       id: req.headers['x-github-delivery'],
       name: req.headers['x-github-event'],
       signature: req.headers['x-hub-signature-256'],
-      payload: req.body,
+      payload: payload,
     });
     res.status(200).send('OK');
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook error at /webhook:', error);
+    console.error('Request body type:', typeof req.body);
+    console.error('Request body length:', req.body ? req.body.length : 'undefined');
     res.status(400).send('Bad Request');
   }
 });
