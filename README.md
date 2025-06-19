@@ -11,6 +11,9 @@ This GitHub App acts as an environment protection rule that evaluates workflow f
 5. Based on the configuration, it approves or rejects the deployment
 6. The decision is sent back to GitHub via the deployment protection rule API
 
+![image](https://github.com/user-attachments/assets/c08885d1-faa9-47ad-ab10-cf9ffd280092)
+
+
 ## 🌟 Features
 
 - **Webhook handler** for environment protection rule events
